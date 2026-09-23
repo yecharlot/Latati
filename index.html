@@ -635,21 +635,33 @@ function detectTenant(){
       }
       var es=new EventSource(API+'/events');
       es.addEventListener('latati_hello',function(){liveConnected=true;loadCatalog(true)});
+      es.addEventListener('hello',function(){liveConnected=true;loadCatalog(true)});
       es.addEventListener('latati_catalog',onCat);
       es.addEventListener('latati_order',onOrd);
       es.addEventListener('latati_chat',onChat);
       es.onerror=function(){liveConnected=false};
       es.onopen=function(){liveConnected=true};
-      var es2=new EventSource('/api/pulse');
-      es2.addEventListener('latati_catalog',onCat);
-      es2.addEventListener('latati_order',onOrd);
-      es2.addEventListener('latati_chat',onChat);
+      var es2=null; // pulse del nodo Render no aplica en GitHub Pages
+      if(es2){es2.addEventListener('latati_catalog',onCat);es2.addEventListener('latati_order',onOrd);es2.addEventListener('latati_chat',onChat);}
     }catch(e){}
   }
   $('nCat').innerHTML=ico('grid');$('nCart').innerHTML=ico('cart');$('nVales').innerHTML=ico('ticket');$('nChat').innerHTML=ico('chat');$('nYo').innerHTML=ico('user');
   fillProfileForm();
   if(!hasClient())show('profile');
   loadCatalog(true);updateBar();bindLive();
+  // Respaldo tiempo real si SSE falla o el edge solo manda ping
+  var _pollRev=0;
+  setInterval(async function(){
+    try{
+      var d=await(await fetch(API+'/catalog',{cache:'no-store'})).json();
+      if(d&&d.ok){
+        var r=d.rev||0;
+        if(r&&r!==_pollRev){_pollRev=r;loadCatalog(true);loadMyOrders();}
+        else if(!items||!items.length)loadCatalog(true);
+      }
+    }catch(e){}
+  },4000);
+
 
   (function setupPWA(){
     var isGestion=!!document.getElementById('view-prods')||location.pathname.indexOf('gestion')>=0;
