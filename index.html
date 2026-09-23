@@ -318,14 +318,27 @@ function detectTenant(){
   function hideAll(){['catalog','detail','cart','vale','myorders','chat','profile'].forEach(function(v){$('view-'+v).classList.add('hidden')})}
   function show(v){
     hideAll();$('view-'+v).classList.remove('hidden');
+    if(v==='cart')renderCart();
+    if(v==='myorders')loadMyOrders();
+    if(v==='chat')loadChat();
     document.querySelectorAll('.nav button').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-v')===v)});
     if(v==='cart'){if(!requireClient())return;renderCart();$('cartBar').classList.add('hidden');fillProfileForm()}
     else if(v==='profile')fillProfileForm();
     else updateBar();
   }
   function photoUrl(p){return p&&p.photo?(API+'/photo/'+p.id+'?t='+(p.updated_at||'')):''}
-  function priceLabel(p){if(p.price_pending||!(p.price>0))return 'Precio a confirmar';return (p.currency||'')+' '+Number(p.price).toFixed(2)}
-  function canBuy(p){return !!(p&&!p.sold_out&&!p.sold&&!p.price_pending&&p.price>0)}
+  function priceLabel(p){if(!p||p.price_pending||!(Number(p.price)>0))return 'Precio a confirmar';return (p.currency||'CUP')+' '+money(p.price)}
+  function canBuy(p){return !!(p&&!p.sold_out&&!p.sold&&!p.price_pending&&Number(p.price)>0)}
+  function money(n){var x=Number(n);if(!isFinite(x))x=0;return x.toFixed(2)}
+  function orderTotal(o){
+    if(!o)return 0;
+    var t=Number(o.total);
+    if(isFinite(t)&&t>=0&&(o.total!=null&&o.total!==''))return t;
+    var sum=0;
+    (o.items||[]).forEach(function(l){sum+=(Number(l.price)||0)*(Number(l.qty)||1)});
+    return sum;
+  }
+  function orderCurrency(o){return (o&&(o.currency||(o.items&&o.items[0]&&o.items[0].currency)))||'CUP'}
   function catOf(p){return (p&&p.category&&String(p.category).trim())||'General'}
 
   function renderChips(){
@@ -401,11 +414,11 @@ function detectTenant(){
     el.innerHTML=ids.map(function(id){
       cart[id]=1;
       var p=items.find(function(x){return x.id===id})||{title:'Producto',price:0,currency:'CUP'};
-      total+=(p.price||0);cur=p.currency||cur;
+      total+=(Number(p.price)||0);cur=p.currency||cur;
       var img=photoUrl(p);
       return '<div class="line" data-id="'+id+'">'+(img?'<img src="'+img+'" alt="">':'')+'<div style="flex:1"><strong>'+esc(p.title)+'</strong><div class="sub">'+esc(priceLabel(p))+'</div></div><button type="button" class="btn btn-ghost rm" style="width:auto;padding:.4rem .6rem;font-size:.75rem">Quitar</button></div>';
     }).join('');
-    saveCart();$('cartTotal').textContent='Total · '+cur+' '+total.toFixed(2);
+    saveCart();$('cartTotal').textContent='Total · '+cur+' '+money(total);
     el.querySelectorAll('.rm').forEach(function(b){b.onclick=function(){delete cart[b.closest('.line').getAttribute('data-id')];saveCart();renderCart();updateBar()}});
     fillProfileForm();syncDeliveryOpts();
   }
@@ -461,7 +474,7 @@ function detectTenant(){
     var isVale=st==='pending'||st==='ready'||st==='delivered';
     var lines=(o.lines||[]).map(function(l){
       var img=l.photo?API+'/photo/'+l.product_id:'';
-      return '<div class="line">'+(img?'<img src="'+img+'" alt="">':'')+'<div><strong>'+esc(l.title)+'</strong><div class="sub">×'+l.qty+' · '+(l.currency||'')+' '+Number(l.price).toFixed(2)+'</div></div></div>';
+      return '<div class="line">'+(img?'<img src="'+img+'" alt="">':'')+'<div><strong>'+esc(l.title)+'</strong><div class="sub">×'+l.qty+' · '+(l.currency||'')+' '+money(l.price)+'</div></div></div>';
     }).join('');
     var hint='';
     if(st==='requested')hint='La gestora confirma disponibilidad.';
@@ -487,7 +500,7 @@ function detectTenant(){
       if(o.owner_name&&o.owner_name!==gName)placeBlock+='<div class="sub">Dueño/a: '+esc(o.owner_name)+'</div>';
     }
     $('valeBox').innerHTML='<div class="vale-card panel"><div style="font-family:Instrument Serif,serif;font-size:1.4rem">'+esc(o.code)+'</div><span class="pill" style="margin-top:.4rem">'+esc(statusLabel(st,o))+'</span>'+lines+
-      '<div style="color:var(--gold);font-weight:700;margin-top:.75rem;font-size:1.05rem">Total · '+(o.currency||'')+' '+Number(o.total).toFixed(2)+'</div>'+
+      '<div style="color:var(--gold);font-weight:700;margin-top:.75rem;font-size:1.05rem">Total · '+orderCurrency(o)+' '+money(orderTotal(o))+'</div>'+
       '<div class="sub" style="margin-top:.5rem">'+esc(o.client_name)+' · '+esc(o.client_phone)+'</div>'+
       placeBlock+gestorBlock+actions+'</div>';
     var bc=$('btnCancelReq');
@@ -525,7 +538,7 @@ function detectTenant(){
     var list=d.items||[],el=$('myOrders');
     if(!list.length){el.innerHTML='<div class="empty"><strong>Sin pedidos</strong>Cuando solicites, aparecerán aquí</div>';return}
     el.innerHTML=list.map(function(o){
-      return '<div class="panel"><strong>'+esc(o.code)+'</strong><div class="sub" style="margin:.25rem 0">'+esc(statusLabel(o.status,o))+'</div><div style="color:var(--gold);font-weight:700">'+(o.currency||'')+' '+Number(o.total).toFixed(2)+'</div><button type="button" class="btn btn-ghost see" data-id="'+o.id+'" style="margin-top:.55rem">Ver detalle</button></div>';
+      return '<div class="panel"><strong>'+esc(o.code)+'</strong><div class="sub" style="margin:.25rem 0">'+esc(statusLabel(o.status,o))+'</div><div style="color:var(--gold);font-weight:700">'+orderCurrency(o)+' '+money(orderTotal(o))+'</div><button type="button" class="btn btn-ghost see" data-id="'+o.id+'" style="margin-top:.55rem">Ver detalle</button></div>';
     }).join('');
     el.querySelectorAll('.see').forEach(function(b){b.onclick=async function(){
       var d=await(await fetch(API+'/order/'+b.getAttribute('data-id')+'?thread='+encodeURIComponent(sid))).json();
@@ -649,6 +662,30 @@ function detectTenant(){
   fillProfileForm();
   if(!hasClient())show('profile');
   loadCatalog(true);updateBar();bindLive();
+  (function pollClientLive(){
+    var lastRev=0;
+    setInterval(async function(){
+      try{
+        var d=await(await fetch(API+'/catalog',{cache:'no-store'})).json();
+        if(d&&d.ok){
+          var r=Number(d.rev)||0;
+          if(r&&r!==lastRev){
+            lastRev=r;
+            items=d.items||[];
+            allCats=d.categories||[];
+            if(d.profile)profile=d.profile;
+            renderChips();renderCatalog();
+            if(!$('view-cart').classList.contains('hidden'))renderCart();
+          }
+        }
+        if(!$('view-myorders').classList.contains('hidden')||!$('view-vale').classList.contains('hidden')){
+          await loadMyOrders();
+          if(!$('view-vale').classList.contains('hidden')&&currentOrder)refreshCurrentVale(true);
+        }
+        if(!$('view-chat').classList.contains('hidden'))loadChat();
+      }catch(e){}
+    },3000);
+  })();
   // Respaldo tiempo real si SSE falla o el edge solo manda ping
   var _pollRev=0;
   setInterval(async function(){
