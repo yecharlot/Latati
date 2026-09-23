@@ -588,7 +588,13 @@ function detectTenant(){
       if(d.profile){profile=d.profile;applyTheme(profile);$('brandName').textContent=profile.name||'La Tati';$('brandSub').textContent=profile.tagline||profile.bio||'Tienda · pedidos · recogida'}
       var rev=d.rev||0;
       if(!force&&rev&&rev===catalogRev&&items.length&&!searchQ&&!activeCat)return;
-      catalogRev=rev;items=d.items||[];allCats=d.categories||[];
+      catalogRev=rev;items=d.items||[];
+      allCats=d.categories||[];
+      if(!allCats.length){
+        var set={};
+        items.forEach(function(it){var c=catOf(it);if(c)set[c]=1});
+        allCats=Object.keys(set).sort(function(a,b){return a.localeCompare(b,'es')});
+      }
       renderChips();renderCatalog();
       var pid=new URLSearchParams(location.search).get('p');
       if(pid)openDetail(pid);
