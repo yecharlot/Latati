@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <base href="./"/>
-<script>window.LATATI_EDGE_API="https://latati-edge.lhmolam-877.workers.dev/api/latati";</script>
+<script>window.LATATI_EDGE_API="https://prisma-tec.onrender.com/api/latati";window.LATATI_API_CANDIDATES=["https://prisma-tec.onrender.com/api/latati","https://latati-edge.lhmolam-877.workers.dev/api/latati"];</script>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0c0a0f"/>
@@ -235,8 +235,36 @@ function ico(name){
   return s[name]||'';
 }
 (function(){
-  window.LATATI_EDGE_API = "https://latati-edge.lhmolam-877.workers.dev/api/latati";
+window.LATATI_EDGE_API = window.LATATI_EDGE_API || "https://prisma-tec.onrender.com/api/latati";
+  window.LATATI_API_CANDIDATES = window.LATATI_API_CANDIDATES || ["https://prisma-tec.onrender.com/api/latati", "https://latati-edge.lhmolam-877.workers.dev/api/latati"];
   var API = window.LATATI_EDGE_API;
+  // Elegir backend alcanzable (móvil a menudo no abre *.workers.dev)
+  async function pickApi(){
+    var bases = (window.LATATI_API_CANDIDATES || [API]).slice();
+    try{
+      var last = localStorage.getItem('latati_api_base');
+      if(last) bases = [last].concat(bases.filter(function(b){return b!==last}));
+    }catch(e){}
+    for(var i=0;i<bases.length;i++){
+      var base = bases[i];
+      try{
+        var ctrl = typeof AbortController!=='undefined' ? new AbortController() : null;
+        var to = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, base.indexOf('onrender.com')>=0 ? 25000 : 8000);
+        var res = await fetch(base + '/catalog', { cache:'no-store', signal: ctrl && ctrl.signal });
+        clearTimeout(to);
+        if(!res.ok) continue;
+        var d = await res.json();
+        if(d && d.ok){
+          API = base;
+          window.LATATI_EDGE_API = base;
+          try{ localStorage.setItem('latati_api_base', base); }catch(e){}
+          return base;
+        }
+      }catch(e){}
+    }
+    return API;
+  }
+
 function detectTenant(){
     var q=new URLSearchParams(location.search).get('t');
     if(q)return String(q).toLowerCase().replace(/[^a-z0-9-]/g,'').replace(/^gestion-/,'')||'latati';
@@ -271,7 +299,7 @@ function detectTenant(){
   function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2400)}
   function esc(s){return String(s||'').replace(/</g,'&lt;')}
   function saveCart(){localStorage.setItem(CK,JSON.stringify(cart))}
-  function clientInfo(){try{return JSON.parse(localStorage.getItem(CINFO)||'{}')}catch(e){return {}}}
+  function clientInfo(){try{var raw=localStorage.getItem(CINFO)||sessionStorage.getItem(CINFO)||'{}';return JSON.parse(raw)}catch(e){return {}}}
   function hasClient(){var c=clientInfo();return !!(c.name&&String(c.name).trim()&&c.phone&&String(c.phone).trim())}
   function requireClient(){if(hasClient())return true;toast('Primero guarda tu nombre y teléfono');show('profile');return false}
   function fillProfileForm(){var c=clientInfo();if($('pName'))$('pName').value=c.name||'';if($('pPhone'))$('pPhone').value=c.phone||'';if($('cName'))$('cName').value=c.name||'';if($('cPhone'))$('cPhone').value=c.phone||''}
@@ -428,7 +456,7 @@ function detectTenant(){
     var name=($('cName').value.trim()||c.name||'').trim();
     var phone=($('cPhone').value.trim()||c.phone||'').trim();
     if(!name||!phone){toast('Nombre y teléfono requeridos');show('profile');return}
-    localStorage.setItem(CINFO,JSON.stringify({name:name,phone:phone}));
+    saveClientProfile(name, phone, true);
     var ids=Object.keys(cart).filter(function(k){return cart[k]>0});
     if(!ids.length){toast('Carrito vacío');return}
     syncDeliveryOpts();
@@ -437,13 +465,39 @@ function detectTenant(){
     if(!d.ok){toast(d.error||'Error');return}
     cart={};saveCart();renderVale(d.order);show('vale');toast('Solicitud enviada');loadCatalog(true);
   };
+  function saveClientProfile(name, phone, silent){
+    name = String(name||'').trim();
+    phone = String(phone||'').replace(/[^0-9+]/g,'').trim();
+    if(!name){ if(!silent) toast('Escribe tu nombre'); return false; }
+    if(!phone || phone.replace(/\D/g,'').length<6){ if(!silent) toast('Teléfono inválido (mín. 6 dígitos)'); return false; }
+    var payload = { name:name, phone:phone, saved_at: Date.now() };
+    try{ localStorage.setItem(CINFO, JSON.stringify(payload)); }catch(e){
+      try{ sessionStorage.setItem(CINFO, JSON.stringify(payload)); }catch(e2){ if(!silent) toast('No se pudo guardar en este navegador'); return false; }
+    }
+    // verificar lectura
+    var read = clientInfo();
+    if(!read.name || !read.phone){
+      if(!silent) toast('No se pudo verificar el guardado');
+      return false;
+    }
+    fillProfileForm();
+    if(!silent) toast('Datos guardados · '+read.name);
+    return true;
+  }
+  // clientInfo lee localStorage o sessionStorage
+  function clientInfo(){
+    try{
+      var raw = localStorage.getItem(CINFO) || sessionStorage.getItem(CINFO) || '{}';
+      return JSON.parse(raw);
+    }catch(e){ return {}; }
+  }
   $('btnSaveProfile').onclick=function(){
-    var name=$('pName').value.trim(),phone=$('pPhone').value.trim();
-    if(!name){toast('Escribe tu nombre');return}
-    if(!phone||phone.length<6){toast('Teléfono inválido');return}
-    localStorage.setItem(CINFO,JSON.stringify({name:name,phone:phone}));
-    fillProfileForm();toast('Datos guardados');show('catalog');
+    if(saveClientProfile($('pName').value, $('pPhone').value, false)) show('catalog');
   };
+  // auto-guardar al salir de los campos del carrito
+  if($('cName')) $('cName').addEventListener('change', function(){ saveClientProfile($('cName').value, ($('cPhone')&&$('cPhone').value)||clientInfo().phone, true); });
+  if($('cPhone')) $('cPhone').addEventListener('change', function(){ saveClientProfile(($('cName')&&$('cName').value)||clientInfo().name, $('cPhone').value, true); });
+
 
   function statusLabel(s,o){
     s=(s||'').toLowerCase();
@@ -666,8 +720,13 @@ function detectTenant(){
   }
   $('nCat').innerHTML=ico('grid');$('nCart').innerHTML=ico('cart');$('nVales').innerHTML=ico('ticket');$('nChat').innerHTML=ico('chat');$('nYo').innerHTML=ico('user');
   fillProfileForm();
-  if(!hasClient())show('profile');
-  loadCatalog(true);updateBar();bindLive();
+  (async function bootClient(){
+    toast('Conectando…');
+    await pickApi();
+    if(!hasClient())show('profile');
+    else show('catalog');
+    loadCatalog(true);updateBar();bindLive();
+  })();
   (function pollClientLive(){
     var lastRev=0;
     setInterval(async function(){
