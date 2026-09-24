@@ -51,7 +51,8 @@ main{width:100%;max-width:100%;overflow-x:hidden}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:transform .2s,box-shadow .2s}
 .card:active{transform:scale(.98)}
 .card .ph{position:relative;aspect-ratio:4/5;background:var(--surface2);overflow:hidden}
-.card .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.card .ph img{width:100%;height:100%;object-fit:cover;display:block;content-visibility:auto}
+.line img,.vale-card img{max-width:64px;max-height:64px;object-fit:cover;border-radius:10px}
 .card .ph .tag{position:absolute;top:.55rem;left:.55rem;background:rgba(12,10,15,.72);backdrop-filter:blur(8px);color:var(--accent);font-size:.65rem;font-weight:700;padding:.25rem .5rem;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
 .card .body{padding:.7rem .75rem .85rem}
 .card .title{font-size:.9rem;font-weight:600;line-height:1.25;margin-bottom:.3rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -353,7 +354,7 @@ function detectTenant(){
     else if(v==='profile')fillProfileForm();
     else updateBar();
   }
-  function photoUrl(p){return p&&p.photo?(API+'/photo/'+p.id+'?t='+(p.updated_at||'')):''}
+  function photoUrl(p){return p&&p.photo?(API+'/photo/'+p.id+'?t='+(p.updated_at||'')+'&w=480'):''}
   function priceLabel(p){if(!p||p.price_pending||!(Number(p.price)>0))return 'Precio a confirmar';return (p.currency||'CUP')+' '+money(p.price)}
   function canBuy(p){return !!(p&&!p.sold_out&&!p.sold&&!p.price_pending&&Number(p.price)>0)}
   function money(n){var x=Number(n);if(!isFinite(x))x=0;return x.toFixed(2)}
@@ -580,7 +581,17 @@ function detectTenant(){
       var id=currentOrder.id||currentOrder.code;
       if(!id)return;
       var d=await(await fetch(API+'/order/'+encodeURIComponent(id)+'?thread='+encodeURIComponent(sid),{cache:'no-store'})).json();
-      if(!d.ok||!d.order)return;
+      // Pedido eliminado por la gestora (fin de ciclo) o ya no existe
+      if(!d.ok||!d.order){
+        currentOrder=null;
+        if($('valeBox'))$('valeBox').innerHTML='';
+        if($('valeHint'))$('valeHint').textContent='';
+        toast('Pedido cerrado · vuelve al catálogo');
+        show('catalog');
+        loadMyOrders();
+        loadCatalog(true);
+        return;
+      }
       var prev=(currentOrder.status||'').toLowerCase();
       var st=(d.order.status||'').toLowerCase();
       renderVale(d.order);
@@ -715,7 +726,21 @@ function detectTenant(){
           else toast('Nuevo mensaje de la tienda');
         }
       }
-      var es=new EventSource(API+'/events');
+      function connectSSE(){
+        try{ if(window.__latatiES) window.__latatiES.close(); }catch(e){}
+        var es=new EventSource(API+'/events');
+        window.__latatiES=es;
+        es.onerror=function(){ liveConnected=false; try{es.close()}catch(e){}; setTimeout(connectSSE, 8000); };
+        es.onopen=function(){ liveConnected=true };
+        es.addEventListener('latati_hello',function(){liveConnected=true;loadCatalog(true)});
+        es.addEventListener('hello',function(){liveConnected=true;loadCatalog(true)});
+        es.addEventListener('latati_catalog',onCat);
+        es.addEventListener('latati_order',onOrd);
+        es.addEventListener('latati_chat',onChat);
+        return es;
+      }
+      var es=connectSSE();
+      /* strip old listeners */
       es.addEventListener('latati_hello',function(){liveConnected=true;loadCatalog(true)});
       es.addEventListener('hello',function(){liveConnected=true;loadCatalog(true)});
       es.addEventListener('latati_catalog',onCat);
@@ -742,43 +767,9 @@ function detectTenant(){
   })();
   (function pollClientLive(){
     var lastRev=0;
-    setInterval(async function(){
-      try{
-        var d=await(await fetch(API+'/catalog',{cache:'no-store'})).json();
-        if(d&&d.ok){
-          var r=Number(d.rev)||0;
-          if(r&&r!==lastRev){
-            lastRev=r;
-            items=d.items||[];
-            allCats=d.categories||[];
-            if(d.profile)profile=d.profile;
-            renderChips();renderCatalog();
-            if(!$('view-cart').classList.contains('hidden'))renderCart();
-          }
-        }
-        if(!$('view-myorders').classList.contains('hidden')||!$('view-vale').classList.contains('hidden')){
-          await loadMyOrders();
-          if(!$('view-vale').classList.contains('hidden')&&currentOrder)refreshCurrentVale(true);
-        }
-        if(!$('view-chat').classList.contains('hidden'))loadChat();
-      }catch(e){}
-    },3000);
   })();
   // Respaldo tiempo real si SSE falla o el edge solo manda ping
-  var _pollRev=0;
-  setInterval(async function(){
-    try{
-      var d=await(await fetch(API+'/catalog',{cache:'no-store'})).json();
-      if(d&&d.ok){
-        var r=d.rev||0;
-        if(r&&r!==_pollRev){_pollRev=r;loadCatalog(true);loadMyOrders();}
-        else if(!items||!items.length)loadCatalog(true);
-      }
-    }catch(e){}
-  },4000);
-
-
-  (function setupPWA(){
+(function setupPWA(){
     var isGestion=!!document.getElementById('view-prods')||location.pathname.indexOf('gestion')>=0;
     var base=typeof API!=='undefined'?API:'/api/latati';
     var manifestURL=base+'/manifest.webmanifest'+(isGestion?'?gestion=1':'');
@@ -834,16 +825,14 @@ function detectTenant(){
     btn.addEventListener('pointerup',function(){if(Date.now()-t>700){localStorage.setItem('latati_pwa_dismiss','1');btn.classList.add('hidden-forced');toast('Botón oculto')}});
   })();
 
+  // Un solo ciclo de poll (12s): catálogo / pedidos / chat / vale — SSE lleva lo urgente
   setInterval(function(){
-    if(!$('view-catalog').classList.contains('hidden')||!$('view-detail').classList.contains('hidden'))loadCatalog(false);
-    if(!$('view-myorders').classList.contains('hidden'))loadMyOrders();
-    if(!$('view-chat').classList.contains('hidden'))loadChat();
-    // Mientras espera confirmación, refrescar el vale (fallback si SSE falla)
-    if(!$('view-vale').classList.contains('hidden')&&currentOrder){
-      var st=(currentOrder.status||'').toLowerCase();
-      if(st==='requested'||st==='pending'||st==='ready')refreshCurrentVale(false);
-    }
-  }, liveConnected?8000:4000);
+    if(!$('view-catalog').classList.contains('hidden')||!$('view-detail').classList.contains('hidden')) loadCatalog(false);
+    if(!$('view-myorders').classList.contains('hidden')) loadMyOrders();
+    if(!$('view-chat').classList.contains('hidden')) loadChat();
+    if(!$('view-vale').classList.contains('hidden')&&currentOrder) refreshCurrentVale(false);
+    else if(currentOrder) loadMyOrders(); // detectar eliminación aunque no estés en el vale
+  }, 12000);
 })();
 </script>
 </body>
