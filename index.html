@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <base href="./"/>
-<script>window.LATATI_EDGE_API="https://prisma-tec.onrender.com/api/latati";window.LATATI_API_CANDIDATES=["https://prisma-tec.onrender.com/api/latati","https://latati-edge.lhmolam-877.workers.dev/api/latati"];</script>
+<script>window.LATATI_EDGE_API="https://prisma-tec.onrender.com/api/latati";window.LATATI_API_CANDIDATES=["https://prisma-tec.onrender.com/api/latati"];</script>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <meta name="theme-color" content="#0c0a0f"/>
@@ -235,34 +235,33 @@ function ico(name){
   return s[name]||'';
 }
 (function(){
-window.LATATI_EDGE_API = window.LATATI_EDGE_API || "https://prisma-tec.onrender.com/api/latati";
-  window.LATATI_API_CANDIDATES = window.LATATI_API_CANDIDATES || ["https://prisma-tec.onrender.com/api/latati", "https://latati-edge.lhmolam-877.workers.dev/api/latati"];
+window.LATATI_EDGE_API = "https://prisma-tec.onrender.com/api/latati";
+  window.LATATI_API_CANDIDATES = ["https://prisma-tec.onrender.com/api/latati"];
   var API = window.LATATI_EDGE_API;
   // Elegir backend alcanzable (móvil a menudo no abre *.workers.dev)
   async function pickApi(){
-    var bases = (window.LATATI_API_CANDIDATES || [API]).slice();
+    // Un solo backend: Render (el móvil no alcanza *.workers.dev y Edge→Render no replica pedidos)
+    var base = "https://prisma-tec.onrender.com/api/latati";
     try{
-      var last = localStorage.getItem('latati_api_base');
-      if(last) bases = [last].concat(bases.filter(function(b){return b!==last}));
+      var last = localStorage.getItem('latati_api_base') || '';
+      if(last.indexOf('workers.dev') >= 0) localStorage.removeItem('latati_api_base');
     }catch(e){}
-    for(var i=0;i<bases.length;i++){
-      var base = bases[i];
-      try{
-        var ctrl = typeof AbortController!=='undefined' ? new AbortController() : null;
-        var to = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, base.indexOf('onrender.com')>=0 ? 25000 : 8000);
-        var res = await fetch(base + '/catalog', { cache:'no-store', signal: ctrl && ctrl.signal });
-        clearTimeout(to);
-        if(!res.ok) continue;
-        var d = await res.json();
-        if(d && d.ok){
-          API = base;
-          window.LATATI_EDGE_API = base;
-          try{ localStorage.setItem('latati_api_base', base); }catch(e){}
-          return base;
-        }
-      }catch(e){}
+    API = base;
+    window.LATATI_EDGE_API = base;
+    try{ localStorage.setItem('latati_api_base', base); }catch(e){}
+    try{
+      var ctrl = typeof AbortController!=='undefined' ? new AbortController() : null;
+      var to = setTimeout(function(){ try{ ctrl && ctrl.abort(); }catch(e){} }, 45000);
+      var res = await fetch(base + '/catalog', { cache:'no-store', signal: ctrl && ctrl.signal });
+      clearTimeout(to);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      var d = await res.json();
+      if(!d || !d.ok) throw new Error('catalog');
+      return base;
+    }catch(e){
+      toast('Servidor despertando… reintenta en unos segundos');
+      return base;
     }
-    return API;
   }
 
 function detectTenant(){
@@ -461,8 +460,18 @@ function detectTenant(){
     if(!ids.length){toast('Carrito vacío');return}
     syncDeliveryOpts();
     if(deliveryType==='delivery'&&!($('cDeliveryAddr').value||'').trim()){toast('Indica la dirección de entrega');return}
-    var d=await(await fetch(API+'/order',{method:'POST',headers:{'Content-Type':'application/json','X-LaTati-Thread':sid},body:JSON.stringify({thread:sid,client_name:name,client_phone:phone,note:$('cNote').value.trim(),delivery_type:deliveryType,delivery_address:($('cDeliveryAddr').value||'').trim(),delivery_note:($('cDeliveryNote')&&$('cDeliveryNote').value||'').trim(),items:ids.map(function(id){return{product_id:id,qty:1}})})})).json();
-    if(!d.ok){toast(d.error||'Error');return}
+    API = 'https://prisma-tec.onrender.com/api/latati';
+    try{ localStorage.setItem('latati_api_base', API); }catch(e){}
+    var d;
+    try{
+      var res = await fetch(API+'/order',{method:'POST',headers:{'Content-Type':'application/json','X-LaTati-Thread':sid},body:JSON.stringify({thread:sid,client_name:name,client_phone:phone,note:$('cNote').value.trim(),delivery_type:deliveryType,delivery_address:($('cDeliveryAddr').value||'').trim(),delivery_note:($('cDeliveryNote')&&$('cDeliveryNote').value||'').trim(),items:ids.map(function(id){return{product_id:id,qty:1}})})});
+      d = await res.json().catch(function(){return {ok:false,error:'respuesta inválida'} });
+      if(!res.ok && !d.error) d.error = 'HTTP '+res.status;
+    }catch(e){
+      toast('No se pudo enviar el pedido (red). Espera y reintenta.');
+      return;
+    }
+    if(!d.ok){toast(d.error||'Error al crear pedido');return}
     cart={};saveCart();renderVale(d.order);show('vale');toast('Solicitud enviada');loadCatalog(true);
   };
   function saveClientProfile(name, phone, silent){
@@ -723,6 +732,10 @@ function detectTenant(){
   (async function bootClient(){
     toast('Conectando…');
     await pickApi();
+    try{
+      var host = (API||'').replace(/^https?:\/\//,'').split('/')[0];
+      if($('brandSub')) $('brandSub').textContent = (profile.tagline||profile.bio||'Tienda') + ' · ' + host;
+    }catch(e){}
     if(!hasClient())show('profile');
     else show('catalog');
     loadCatalog(true);updateBar();bindLive();
