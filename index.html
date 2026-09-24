@@ -181,8 +181,14 @@ h2.section{font-family:"Instrument Serif",Georgia,serif;font-size:1.35rem;font-w
       <div id="deliveryAddrWrap" class="hidden">
         <label class="sub">Dirección de entrega</label>
         <textarea id="cDeliveryAddr" rows="2" placeholder="Calle, número, municipio, referencias…"></textarea>
-        <label class="sub">Detalles de entrega (hora aproximada, etc.)</label>
-        <textarea id="cDeliveryNote" rows="2" placeholder="Ej. entre 4 y 6 pm, llamar al llegar…"></textarea>
+        <label class="sub">Hora aproximada de entrega (opcional)</label>
+        <input id="cDeliveryTime" type="text" placeholder="Ej. entre 4 y 6 pm, o 17:00"/>
+        <label class="sub">Detalles de entrega (opcional)</label>
+        <textarea id="cDeliveryNote" rows="2" placeholder="Ej. llamar al llegar, portón azul…"></textarea>
+      </div>
+      <div id="pickupTimeWrap">
+        <label class="sub">Hora aproximada de recogida (opcional)</label>
+        <input id="cPickupTime" type="text" placeholder="Ej. después de las 5 pm"/>
       </div>
       <label class="sub">Nombre</label><input id="cName"/>
       <label class="sub">Teléfono</label><input id="cPhone" inputmode="tel"/>
@@ -327,6 +333,7 @@ function detectTenant(){
     optP.classList.toggle('on',deliveryType==='pickup');
     optD.classList.toggle('on',deliveryType==='delivery');
     if(wrap)wrap.classList.toggle('hidden',deliveryType!=='delivery');
+    var ptw=$('pickupTimeWrap'); if(ptw)ptw.classList.toggle('hidden',deliveryType==='delivery');
     var msg='';
     if(hasDelOnly&&hasPickOnly)msg='Hay productos incompatibles (solo recogida y solo domicilio). Sepáralos en dos pedidos.';
     else if(onlyDel)msg='Estos productos solo se entregan a domicilio.';
@@ -463,9 +470,26 @@ function detectTenant(){
     if(deliveryType==='delivery'&&!($('cDeliveryAddr').value||'').trim()){toast('Indica la dirección de entrega');return}
     API = 'https://prisma-tec.onrender.com/api/latati';
     try{ localStorage.setItem('latati_api_base', API); }catch(e){}
+    var note=($('cNote').value||'').trim();
+    var dNote=($('cDeliveryNote')&&$('cDeliveryNote').value||'').trim();
+    var dTime=($('cDeliveryTime')&&$('cDeliveryTime').value||'').trim();
+    var pTime=($('cPickupTime')&&$('cPickupTime').value||'').trim();
+    var preferred_time=deliveryType==='delivery'?dTime:pTime;
+    if(preferred_time){
+      if(deliveryType==='delivery') dNote=(dNote?dNote+' · ':'')+'Hora aprox. entrega: '+preferred_time;
+      else note=(note?note+' · ':'')+'Hora aprox. recogida: '+preferred_time;
+    }
+    var payload={
+      thread:sid, client_name:name, client_phone:phone, note:note,
+      delivery_type:deliveryType,
+      delivery_address:($('cDeliveryAddr').value||'').trim(),
+      delivery_note:dNote,
+      preferred_time:preferred_time,
+      items:ids.map(function(id){return{product_id:id,qty:1}})
+    };
     var d;
     try{
-      var res = await fetch(API+'/order',{method:'POST',headers:{'Content-Type':'application/json','X-LaTati-Thread':sid},body:JSON.stringify({thread:sid,client_name:name,client_phone:phone,note:$('cNote').value.trim(),delivery_type:deliveryType,delivery_address:($('cDeliveryAddr').value||'').trim(),delivery_note:($('cDeliveryNote')&&$('cDeliveryNote').value||'').trim(),items:ids.map(function(id){return{product_id:id,qty:1}})})});
+      var res = await fetch(API+'/order',{method:'POST',headers:{'Content-Type':'application/json','X-LaTati-Thread':sid},body:JSON.stringify(payload)});
       d = await res.json().catch(function(){return {ok:false,error:'respuesta inválida'} });
       if(!res.ok && !d.error) d.error = 'HTTP '+res.status;
     }catch(e){
@@ -557,6 +581,7 @@ function detectTenant(){
     var placeBlock='';
     if((o.delivery_type||'')==='delivery'){
       placeBlock='<div class="sub" style="margin-top:.4rem"><strong>Domicilio:</strong> '+esc(o.delivery_address||'—')+'</div>';
+      if(o.preferred_time)placeBlock+='<div class="sub"><strong>Hora aprox.:</strong> '+esc(o.preferred_time)+'</div>';
       if(o.delivery_note)placeBlock+='<div class="sub">Detalles: '+esc(o.delivery_note)+'</div>';
     } else {
       var addr=o.pickup_address||o.address||'';
@@ -663,12 +688,16 @@ function detectTenant(){
       var rev=d.rev||0;
       if(!force&&rev&&rev===catalogRev&&items.length&&!searchQ&&!activeCat)return;
       catalogRev=rev;items=d.items||[];
-      allCats=d.categories||[];
-      if(!allCats.length){
+      (function(){
         var set={};
-        items.forEach(function(it){var c=catOf(it);if(c)set[c]=1});
+        items.forEach(function(it){
+          if(!it || it.sold_out || it.sold) return;
+          var c=catOf(it);
+          if(c) set[c]=1;
+        });
         allCats=Object.keys(set).sort(function(a,b){return a.localeCompare(b,'es')});
-      }
+        if(activeCat && allCats.indexOf(activeCat)<0) activeCat='';
+      })();
       renderChips();renderCatalog();
       var pid=new URLSearchParams(location.search).get('p');
       if(pid)openDetail(pid);
