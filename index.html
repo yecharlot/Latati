@@ -384,17 +384,21 @@ function detectTenant(){
       var on=(c===''&&!activeCat)||(c&&c===activeCat);
       return '<button type="button" class="chip'+(on?' on':'')+'" data-c="'+esc(c)+'">'+esc(label)+'</button>';
     }).join('');
-    el.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){activeCat=b.getAttribute('data-c')||'';loadCatalog(true)}});
+    el.querySelectorAll('.chip').forEach(function(b){b.onclick=function(){activeCat=b.getAttribute('data-c')||'';renderChips();renderCatalog();}});
   }
 
   function renderCatalog(){
     var g=$('grid');
-    $('resultCount').textContent=items.length+(items.length===1?' producto':' productos');
-    if(!items.length){
+    var list=items;
+    if(activeCat){
+      list=items.filter(function(p){ return catOf(p)===activeCat; });
+    }
+    $('resultCount').textContent=list.length+(list.length===1?' producto':' productos');
+    if(!list.length){
       g.innerHTML='<div class="empty" style="grid-column:1/-1"><strong>No hay resultados</strong>Prueba otra categoría o búsqueda</div>';
       return;
     }
-    g.innerHTML=items.map(function(p){
+    g.innerHTML=list.map(function(p){
       var img=photoUrl(p);
       var dm=p.delivery_mode||'both';
       var dtag=dm==='delivery'?'Domicilio':(dm==='pickup'?'Recogida':'');
@@ -680,13 +684,13 @@ function detectTenant(){
 
   async function loadCatalog(force){
     try{
+      // Siempre pedimos el catálogo completo para que los chips de categoría no desaparezcan
       var qs='?sort='+encodeURIComponent(sortBy);
-      if(activeCat)qs+='&category='+encodeURIComponent(activeCat);
       if(searchQ)qs+='&q='+encodeURIComponent(searchQ);
       var d=await(await fetch(API+'/catalog'+qs,{cache:'no-store'})).json();
       if(d.profile){profile=d.profile;applyTheme(profile);$('brandName').textContent=profile.name||'La Tati';$('brandSub').textContent=profile.tagline||profile.bio||'Tienda · pedidos · recogida'}
       var rev=d.rev||0;
-      if(!force&&rev&&rev===catalogRev&&items.length&&!searchQ&&!activeCat)return;
+      if(!force&&rev&&rev===catalogRev&&items.length&&!searchQ)return;
       catalogRev=rev;items=d.items||[];
       (function(){
         var set={};
